@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+aiohttp
+httpx
+SQLAlchemy
+aiosqlite
+jinja2
+python-dotenv
+pydantic

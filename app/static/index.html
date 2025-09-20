@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Energy Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .cards { display:flex; gap:20px; margin-bottom:20px; }
+    .card { padding:12px 16px; border-radius:8px; background:#fafafa; box-shadow:0 2px 6px rgba(0,0,0,0.06); min-width:160px; }
+    #chart { max-width:1000px; height:300px; }
+  </style>
+</head>
+<body>
+  <h1>Home Energy Monitor</h1>
+  <div class="cards">
+    <div class="card"><h3>Consumption</h3><div id="consumption">-</div></div>
+    <div class="card"><h3>Generation</h3><div id="generation">-</div></div>
+    <div class="card"><h3>Exported</h3><div id="exported">-</div></div>
+    <div class="card"><h3>Price (€/kWh)</h3><div id="price">-</div></div>
+  </div>
+
+  <canvas id="chart"></canvas>
+
+  <script>
+    const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/updates';
+    const ws = new WebSocket(wsUrl);
+
+    const consumptionEl = document.getElementById('consumption');
+    const generationEl = document.getElementById('generation');
+    const exportedEl = document.getElementById('exported');
+    const priceEl = document.getElementById('price');
+
+    const ctx = document.getElementById('chart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        datasets: [
+          { label: 'Consumption (kWh)', data: [], borderColor: undefined, tension:0.2 },
+          { label: 'Generation (kWh)', data: [], borderColor: undefined, tension:0.2 },
+          { label: 'Exported (kWh)', data: [], borderColor: undefined, tension:0.2 }
+        ]
+      },
+      options: {
+        animation: false,
+        scales: {
+          x: { type: 'time', time: { unit: 'minute' }},
+          y: { beginAtZero: true }
+        }
+      }
+    });
+
+    function pushPoint(ts, c, g, e) {
+      chart.data.datasets[0].data.push({x: new Date(ts), y: c});
+      chart.data.datasets[1].data.push({x: new Date(ts), y: g});
+      chart.data.datasets[2].data.push({x: new Date(ts), y: e});
+      if (chart.data.datasets[0].data.length > 200) {
+        chart.data.datasets.forEach(ds => ds.data.shift());
+      }
+      chart.update();
+    }
+
+    ws.onopen = () => {
+      console.log("connected");
+      setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send('ping'); }, 20000);
+    };
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'measurement') {
+        const d = msg.data;
+        const consumption = (d.energy_consumed_kwh || 0);
+        const generation = (d.energy_generated_kwh || 0);
+        const exported = (d.energy_exported_kwh || 0);
+        consumptionEl.textContent = (consumption).toFixed(5) + ' kWh';
+        generationEl.textContent = (generation).toFixed(5) + ' kWh';
+        exportedEl.textContent = (exported).toFixed(5) + ' kWh';
+        priceEl.textContent = (d.price_eur_per_kwh !== null ? d.price_eur_per_kwh.toFixed(5) : '-');
+        pushPoint(d.timestamp, consumption, generation, exported);
+      }
+    };
+    ws.onclose = () => console.log("ws closed");
+  </script>
+</body>
+</html>
