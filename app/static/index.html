@@ -3,82 +3,404 @@
 <head>
   <meta charset="utf-8">
   <title>Energy Monitor</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    .cards { display:flex; gap:20px; margin-bottom:20px; }
-    .card { padding:12px 16px; border-radius:8px; background:#fafafa; box-shadow:0 2px 6px rgba(0,0,0,0.06); min-width:160px; }
-    #chart { max-width:1000px; height:300px; }
+    body { font-family: Arial, sans-serif; margin: 20px; color:#222; }
+    .cards { display:flex; gap:20px; margin-bottom:20px; flex-wrap: wrap; }
+    .card { padding:12px 16px; border-radius:10px; background:linear-gradient(180deg,#ffffff,#f6f8fb); box-shadow:0 6px 18px rgba(0,0,0,0.07); min-width:180px; border:1px solid #eef2f7; }
+    #chart { max-width:1100px; height:320px; }
+    #priceChart { max-width:1100px; height:220px; margin-top:18px; }
+    .flowWrap { margin: 10px 0 20px; display:flex; justify-content:center; }
+    svg.flow { width: 100%; max-width: 980px; height: 260px; border: 1px solid #eef2f7; border-radius: 12px; background: #fff; box-shadow:0 6px 18px rgba(0,0,0,0.05); }
+    .node { stroke: #cfd8e3; }
+    .label { font: 12px Arial, sans-serif; fill: #444; }
+    .value { font: 15px Arial, sans-serif; font-weight: bold; fill: #111; }
   </style>
 </head>
 <body>
   <h1>Home Energy Monitor</h1>
+
+  <div class="flowWrap">
+    <svg class="flow" viewBox="0 0 980 260">
+      <defs>
+        <linearGradient id="gGrid" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#f7f9fc"/>
+          <stop offset="100%" stop-color="#eef3fb"/>
+        </linearGradient>
+        <linearGradient id="gHome" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#f7fcf7"/>
+          <stop offset="100%" stop-color="#e9f7ef"/>
+        </linearGradient>
+        <linearGradient id="gSolar" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#fff9e6"/>
+          <stop offset="100%" stop-color="#fff2c2"/>
+        </linearGradient>
+        <linearGradient id="gExport" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#fff7f5"/>
+          <stop offset="100%" stop-color="#ffe7df"/>
+        </linearGradient>
+        <marker id="arrowSoft" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L0,8 L8,4 z" fill="#9aa4b2"/>
+        </marker>
+        <marker id="arrowGreen" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L0,8 L8,4 z" fill="#2ca02c"/>
+        </marker>
+        <marker id="arrowOrange" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L0,8 L8,4 z" fill="#ff7f0e"/>
+        </marker>
+        <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity="0.15"/>
+        </filter>
+      </defs>
+
+      <!-- Nodes -->
+      <rect x="40"  y="40"  width="180" height="68" rx="12" class="node" fill="url(#gGrid)" filter="url(#shadow)"></rect>
+      <rect x="40"  y="140" width="180" height="68" rx="12" class="node" fill="url(#gExport)" filter="url(#shadow)"></rect>
+      <rect x="400" y="70"  width="180" height="68" rx="12" class="node" fill="url(#gHome)" filter="url(#shadow)"></rect>
+      <rect x="760" y="40"  width="180" height="68" rx="12" class="node" fill="url(#gSolar)" filter="url(#shadow)"></rect>
+
+      <!-- Labels -->
+      <text x="130" y="58"  text-anchor="middle" class="label">Grid import</text>
+      <text x="130" y="158" text-anchor="middle" class="label">Export to grid</text>
+      <text x="490" y="88"  text-anchor="middle" class="label">Home consumption</text>
+      <text x="850" y="58"  text-anchor="middle" class="label">Solar generation</text>
+
+      <!-- Values (W) -->
+      <text id="grid-w"   x="130" y="86"  text-anchor="middle" class="value">- W</text>
+      <text id="export-w" x="130" y="186" text-anchor="middle" class="value">- W</text>
+      <text id="home-w"   x="490" y="116" text-anchor="middle" class="value">- W</text>
+      <text id="solar-w"  x="850" y="86"  text-anchor="middle" class="value">- W</text>
+
+      <!-- Curved flow paths (thickness reflects magnitude) -->
+      <path id="p_grid_home"  d="M220,74 C300,80 340,92 400,104"  fill="none" stroke="#9aa4b2" stroke-width="0.8" marker-end="url(#arrowSoft)"/>
+      <path id="p_solar_home" d="M760,74 C700,86 650,96 580,104" fill="none" stroke="#2ca02c" stroke-width="0.8" marker-end="url(#arrowGreen)"/>
+      <path id="p_home_export" d="M400,144 C300,160 250,172 220,196" fill="none" stroke="#ff7f0e" stroke-width="0.8" marker-end="url(#arrowOrange)"/>
+    </svg>
+  </div>
+
   <div class="cards">
-    <div class="card"><h3>Consumption</h3><div id="consumption">-</div></div>
-    <div class="card"><h3>Generation</h3><div id="generation">-</div></div>
-    <div class="card"><h3>Exported</h3><div id="exported">-</div></div>
-    <div class="card"><h3>Price (€/kWh)</h3><div id="price">-</div></div>
+    <div class="card"><h3>Buy Price (€/kWh)</h3><div id="price-buy">-</div></div>
+    <div class="card"><h3>Sell Price (€/kWh)</h3><div id="price-sell">-</div></div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><h3>Purchased today (Wh)</h3><div id="purchased-wh">-</div></div>
+    <div class="card"><h3>Sold today (Wh)</h3><div id="sold-wh">-</div></div>
+    <div class="card"><h3>Cost today (€)</h3><div id="cost-eur">-</div></div>
+    <div class="card"><h3>Revenue today (€)</h3><div id="revenue-eur">-</div></div>
+    <div class="card"><h3>Net today (€)</h3><div id="net-eur">-</div></div>
   </div>
 
   <canvas id="chart"></canvas>
+  <canvas id="priceChart"></canvas>
 
   <script>
+    if (window.Chart) { Chart.defaults.locale = 'en-US'; }
+
     const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/updates';
-    const ws = new WebSocket(wsUrl);
+    let ws, wsWatchdog = null, pollTimer = null;
 
-    const consumptionEl = document.getElementById('consumption');
-    const generationEl = document.getElementById('generation');
-    const exportedEl = document.getElementById('exported');
-    const priceEl = document.getElementById('price');
+    const priceBuyEl   = document.getElementById('price-buy');
+    const priceSellEl  = document.getElementById('price-sell');
 
+    const gridWEl   = document.getElementById('grid-w');
+    const homeWEl   = document.getElementById('home-w');
+    const solarWEl  = document.getElementById('solar-w');
+    const exportWEl = document.getElementById('export-w');
+
+    const purchasedWhEl = document.getElementById('purchased-wh');
+    const soldWhEl      = document.getElementById('sold-wh');
+    const costEurEl     = document.getElementById('cost-eur');
+    const revenueEurEl  = document.getElementById('revenue-eur');
+    const netEurEl      = document.getElementById('net-eur');
+
+    // Power chart (W) — allows negative values for grid exchange
     const ctx = document.getElementById('chart').getContext('2d');
+    const maxPoints = 1200; // ~1h @ 3s
     const chart = new Chart(ctx, {
       type: 'line',
       data: {
         datasets: [
-          { label: 'Consumption (kWh)', data: [], borderColor: undefined, tension:0.2 },
-          { label: 'Generation (kWh)', data: [], borderColor: undefined, tension:0.2 },
-          { label: 'Exported (kWh)', data: [], borderColor: undefined, tension:0.2 }
+          { label: 'Generation (W) [power_generation_w]', data: [], borderColor: '#2ca02c', backgroundColor: 'transparent', tension:0.25, pointRadius: 0 },
+          { label: 'Grid (W) [power_consumption_w]',      data: [], borderColor: '#1f77b4', backgroundColor: 'transparent', tension:0.25, pointRadius: 0 },
+          { label: 'Total consumption (W) [total_consumption_w]', data: [], borderColor: '#6b7280', backgroundColor: 'transparent', tension:0.25, pointRadius: 0 }
         ]
       },
       options: {
+        locale: 'en-US',
         animation: false,
+        parsing: false,
+        plugins: {
+          decimation: { enabled: true, algorithm: 'lttb' },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.dataset.label}: ${Number(ctx.parsed.y||0).toFixed(0)} W`
+            }
+          },
+          legend: { display: true }
+        },
         scales: {
-          x: { type: 'time', time: { unit: 'minute' }},
-          y: { beginAtZero: true }
+          x: { type: 'time', time: { unit: 'minute', stepSize: 5 } },
+          y: {
+            beginAtZero: false, // allow negative
+            ticks: { callback: (v) => Number(v).toFixed(0) }
+          }
         }
       }
     });
 
-    function pushPoint(ts, c, g, e) {
-      chart.data.datasets[0].data.push({x: new Date(ts), y: c});
-      chart.data.datasets[1].data.push({x: new Date(ts), y: g});
-      chart.data.datasets[2].data.push({x: new Date(ts), y: e});
-      if (chart.data.datasets[0].data.length > 200) {
-        chart.data.datasets.forEach(ds => ds.data.shift());
+    function updateAxes(ts) {
+      const last = ts ? new Date(ts) : new Date();
+      const hourAgo = new Date(last.getTime() - 60 * 60 * 1000);
+      chart.options.scales.x.min = hourAgo;
+      chart.options.scales.x.max = new Date(last.getTime() + 5 * 1000);
+
+      // Auto y-range based on recent data (allow negatives)
+      const take = 400;
+      let minVal = Infinity, maxVal = -Infinity;
+      chart.data.datasets.forEach(ds => {
+        const slice = ds.data.slice(Math.max(0, ds.data.length - take));
+        slice.forEach(p => {
+          if (typeof p.y === 'number') {
+            if (p.y < minVal) minVal = p.y;
+            if (p.y > maxVal) maxVal = p.y;
+          }
+        });
+      });
+      if (!isFinite(minVal) || !isFinite(maxVal)) {
+        minVal = -1000; maxVal = 1000;
       }
+      if (minVal === maxVal) {
+        const pad = Math.max(100, Math.abs(minVal) * 0.2);
+        minVal -= pad; maxVal += pad;
+      } else {
+        const span = maxVal - minVal;
+        const pad = Math.max(100, span * 0.1);
+        minVal -= pad; maxVal += pad;
+      }
+      chart.options.scales.y.min = Math.floor(minVal);
+      chart.options.scales.y.max = Math.ceil(maxVal);
       chart.update();
     }
 
-    ws.onopen = () => {
-      console.log("connected");
-      setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send('ping'); }, 20000);
-    };
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === 'measurement') {
-        const d = msg.data;
-        const consumption = (d.energy_consumed_kwh || 0);
-        const generation = (d.energy_generated_kwh || 0);
-        const exported = (d.energy_exported_kwh || 0);
-        consumptionEl.textContent = (consumption).toFixed(5) + ' kWh';
-        generationEl.textContent = (generation).toFixed(5) + ' kWh';
-        exportedEl.textContent = (exported).toFixed(5) + ' kWh';
-        priceEl.textContent = (d.price_eur_per_kwh !== null ? d.price_eur_per_kwh.toFixed(5) : '-');
-        pushPoint(d.timestamp, consumption, generation, exported);
+    function pushPowerPoint(ts, genW, mainW, totalW) {
+      chart.data.datasets[0].data.push({x: new Date(ts), y: Number(genW)  || 0});
+      chart.data.datasets[1].data.push({x: new Date(ts), y: Number(mainW) || 0});   // can be negative
+      chart.data.datasets[2].data.push({x: new Date(ts), y: Number(totalW)|| 0});
+      if (chart.data.datasets[0].data.length > maxPoints) {
+        chart.data.datasets.forEach(ds => ds.data.splice(0, ds.data.length - maxPoints));
       }
-    };
-    ws.onclose = () => console.log("ws closed");
+      updateAxes(ts);
+    }
+
+    // Flow paths
+    const pGridHome   = document.getElementById('p_grid_home');
+    const pSolarHome  = document.getElementById('p_solar_home');
+    const pHomeExport = document.getElementById('p_home_export');
+
+    function widthFromW(w) {
+      const n = Math.abs(Number(w) || 0);
+      return Math.min(2.0, 0.6 + Math.sqrt(n) * 0.04);
+    }
+
+    function updateFlow(d) {
+      const solar = Number(d.power_generation_w || 0);
+      const total = Number(d.total_consumption_w || 0);
+      const main  = Number(d.power_consumption_w || 0);
+
+      // Grid exchange from main sign
+      const importW = Math.max(0, main);   // grid import when main > 0
+      const exportW = Math.max(0, -main);  // grid export when main < 0
+
+      const consumption = total || (importW + Math.max(0, solar - exportW));
+
+      solarWEl.textContent  = Math.round(solar) + ' W';
+      homeWEl.textContent   = Math.round(consumption) + ' W';
+      gridWEl.textContent   = Math.round(importW) + ' W';
+      exportWEl.textContent = Math.round(exportW) + ' W';
+
+      if (pGridHome)   pGridHome.setAttribute('stroke-width', widthFromW(importW));
+      if (pSolarHome)  pSolarHome.setAttribute('stroke-width', widthFromW(solar));
+      if (pHomeExport) pHomeExport.setAttribute('stroke-width', widthFromW(exportW));
+    }
+
+    function setPriceCards(d) {
+      priceBuyEl.textContent  = (d.price_buy_eur_per_kwh  != null ? Number(d.price_buy_eur_per_kwh).toFixed(5)  : '-');
+      priceSellEl.textContent = (d.price_sell_eur_per_kwh != null ? Number(d.price_sell_eur_per_kwh).toFixed(5) : '-');
+    }
+
+    async function initLatest() {
+      try {
+        const res = await fetch('/api/latest');
+        if (!res.ok) return;
+        const d = await res.json();
+        if (!d || !d.timestamp) return;
+        setPriceCards(d);
+        updateFlow(d);
+        // Plot power in W
+        pushPowerPoint(d.timestamp, d.power_generation_w, d.power_consumption_w, d.total_consumption_w);
+      } catch {}
+    }
+
+    async function loadHistory() {
+      try {
+        const res = await fetch('/api/history?limit=1200');
+        if (!res.ok) return;
+        const rows = await res.json();
+        rows.slice().reverse().forEach(d => {
+          pushPowerPoint(d.timestamp, d.power_generation_w, d.power_consumption_w, d.total_consumption_w);
+        });
+        if (rows.length > 0) {
+          setPriceCards(rows[0]);
+          updateFlow(rows[0]);
+        }
+      } catch {}
+    }
+
+    async function loadDailySummary() {
+      try {
+        const res = await fetch('/api/daily-summary');
+        if (!res.ok) return;
+        const d = await res.json();
+        purchasedWhEl.textContent = Number(d.energy_purchased_wh || 0).toFixed(1);
+        soldWhEl.textContent      = Number(d.energy_sold_wh || 0).toFixed(1);
+        costEurEl.textContent     = (d.cost_eur != null ? Number(d.cost_eur).toFixed(4) : '-');
+        revenueEurEl.textContent  = (d.revenue_eur != null ? Number(d.revenue_eur).toFixed(4) : '-');
+        netEurEl.textContent      = (d.net_eur != null ? Number(d.net_eur).toFixed(4) : '-');
+      } catch {}
+    }
+
+    // Price chart stays as is...
+    const pctx = document.getElementById('priceChart').getContext('2d');
+    const priceChart = new Chart(pctx, {
+      type: 'line',
+      data: {
+        datasets: [
+          { label: 'Buy (€/kWh)',  data: [], borderColor: '#6b7280', backgroundColor: 'transparent', tension:0.25, pointRadius: 2 },
+          { label: 'Sell (€/kWh)', data: [], borderColor: '#8b5cf6', backgroundColor: 'transparent', tension:0.25, pointRadius: 2 }
+        ]
+      },
+      options: {
+        locale: 'en-US',
+        animation: false,
+        parsing: false,
+        plugins: {
+          tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${Number(ctx.parsed.y||0).toFixed(5)} €/kWh` } },
+          legend: { display: true }
+        },
+        scales: {
+          x: { type: 'time', time: { unit: 'hour', stepSize: 1 } },
+          y: { beginAtZero: false }
+        }
+      }
+    });
+
+    function localMidnightRange(dateRef = new Date()) {
+      const start = new Date(dateRef);
+      start.setHours(0,0,0,0);
+      const end = new Date(start.getTime() + 24*60*60*1000);
+      return [start, end];
+    }
+
+    function parseLocalNaive(s) {
+      const [date, time = "00:00:00"] = s.split("T");
+      const [y, m, d] = date.split("-").map(n => parseInt(n, 10));
+      const [hh, mm, ss] = time.split(":").map(n => parseInt(n, 10));
+      return new Date(y, (m - 1), d, hh || 0, mm || 0, ss || 0, 0);
+    }
+
+    async function loadDailyPrices(dayStr) {
+      try {
+        const url = dayStr ? `/api/daily-prices?day=${encodeURIComponent(dayStr)}` : '/api/daily-prices';
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const arr = await res.json();
+        const buy = [], sell = [];
+        arr.forEach(r => {
+          const t = parseLocalNaive(r.hour_local_naive);
+          if (r.price_buy_eur_per_kwh  != null) buy.push({ x: t, y: r.price_buy_eur_per_kwh });
+          if (r.price_sell_eur_per_kwh != null) sell.push({ x: t, y: r.price_sell_eur_per_kwh });
+        });
+        priceChart.data.datasets[0].data = buy;
+        priceChart.data.datasets[1].data = sell;
+
+        const refLocal = arr.length ? parseLocalNaive(arr[0].hour_local_naive) : new Date();
+        const [start, end] = localMidnightRange(refLocal);
+        priceChart.options.scales.x.time.parser = false;
+        priceChart.options.scales.x.min = start;
+        priceChart.options.scales.x.max = end;
+        priceChart.update();
+      } catch {}
+    }
+
+    function startHttpPolling() {
+      if (pollTimer) return;
+      console.log('[poll] start HTTP polling');
+      pollTimer = setInterval(async () => {
+        try {
+          const res = await fetch('/api/latest');
+          if (!res.ok) return;
+          const d = await res.json();
+          if (!d || !d.timestamp) return;
+          setPriceCards(d);
+          updateFlow(d);
+          pushPowerPoint(d.timestamp, d.power_generation_w, d.power_consumption_w, d.total_consumption_w);
+        } catch (e) {
+          console.warn('[poll] error', e);
+        }
+      }, 3000);
+    }
+
+    function setupWebSocket() {
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch (e) {
+        console.warn('[ws] failed to create', e);
+        startHttpPolling();
+        return;
+      }
+      wsWatchdog = setTimeout(() => {
+        console.warn('[ws] no message within 2s, falling back to HTTP polling');
+        startHttpPolling();
+      }, 2000);
+
+      ws.onopen = () => {
+        console.log('[ws] open');
+        setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send('ping'); }, 20000);
+      };
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (wsWatchdog) { clearTimeout(wsWatchdog); wsWatchdog = null; }
+          if (msg.type === 'measurement') {
+            const d = msg.data;
+            setPriceCards(d);
+            updateFlow(d);
+            pushPowerPoint(d.timestamp, d.power_generation_w, d.power_consumption_w, d.total_consumption_w);
+          }
+        } catch (err) {
+          console.warn('[ws] parse/update failed', err);
+        }
+      };
+      ws.onerror = (e) => {
+        console.warn('[ws] error', e);
+        startHttpPolling();
+      };
+      ws.onclose = () => {
+        console.warn('[ws] close');
+        startHttpPolling();
+      };
+    }
+
+    // Initial load and periodic refresh
+    initLatest();
+    loadHistory();
+    loadDailySummary();
+    loadDailyPrices();
+    setupWebSocket();
+    setInterval(loadDailySummary, 30000);
+    setInterval(loadDailyPrices, 15 * 60 * 1000);
   </script>
 </body>
 </html>

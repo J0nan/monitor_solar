@@ -10,25 +10,28 @@ ESIOS_INDICATOR_ID = int(os.environ.get("ESIOS_INDICATOR_ID", "1001"))
 
 class EsiosClient:
     def __init__(self):
+        if not ESIOS_API_KEY:
+            raise ValueError("ESIOS_API_KEY environment variable is not set")
         self.session = aiohttp.ClientSession(headers={
-            "Accept": "application/json; application/vnd.esios-api-v1+json",
-            "x-api-key": f'"{ESIOS_API_KEY}"'
+            "Accept": "application/json; application/vnd.esios-api-v2+json",
+            "Content-Type": "application/json",
+            "x-api-key": ESIOS_API_KEY,
         })
 
     async def close(self):
         await self.session.close()
 
-    async def get_pvpc_for_range(self, start_dt, end_dt):
+    async def _get_indicator_for_range(self, indicator_id: int, start_dt, end_dt):
         """
-        Get PVPC prices for [start_dt, end_dt). Returns dict: {hour_dt_utc: price_eur_per_kwh}
-        This calls /indicators/{id}?start_date=...&end_date=...
-        The ESIOS API often returns values in €/MWh; we convert to €/kWh by dividing by 1000.
+        Generic fetch for an indicator over [start_dt, end_dt).
+        Returns dict: {hour_dt_utc: price_eur_per_kwh}
         """
         params = {
             "start_date": start_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "end_date": end_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            "end_date": end_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "time_trunc": "hour",
         }
-        url = ESIOS_BASE + f"indicators/{ESIOS_INDICATOR_ID}"
+        url = ESIOS_BASE + f"indicators/{indicator_id}"
         async with self.session.get(url, params=params) as resp:
             resp.raise_for_status()
             js = await resp.json()
@@ -47,8 +50,20 @@ class EsiosClient:
             if val is None:
                 continue
             try:
-                price = float(val) / 1000.0
+                price = float(val) / 1000.0  # €/MWh => €/kWh
             except Exception:
                 price = float(val)
             out[hour] = price
         return out
+
+    async def get_pvpc_for_range(self, start_dt, end_dt):
+        """
+        Backward-compatible: default to buying indicator 1001.
+        """
+        return await self._get_indicator_for_range(ESIOS_INDICATOR_ID, start_dt, end_dt)
+
+    async def get_buy_prices_for_range(self, start_dt, end_dt):
+        return await self._get_indicator_for_range(1001, start_dt, end_dt)
+
+    async def get_sell_prices_for_range(self, start_dt, end_dt):
+        return await self._get_indicator_for_range(1739, start_dt, end_dt)
