@@ -620,25 +620,3 @@ async def websocket_endpoint(ws: WebSocket):
 @app.get("/")
 async def index():
     return FileResponse("app/static/index.html")
-
-@app.post("/api/bootstrap")
-async def api_bootstrap(days: int = 730, force: bool = False):
-    """
-    Manually trigger historical bootstrap.
-    - days: how many days back from now (default 730 = ~2y)
-    - force: run even if DB already has data
-    """
-    if days <= 0:
-        return JSONResponse({"ok": False, "error": "days must be > 0"}, status_code=400)
-
-    session = SessionLocal()
-    try:
-        has_data = session.query(Measurement).first() is not None
-    finally:
-        session.close()
-    if has_data and not force:
-        return JSONResponse({"ok": False, "error": "DB not empty; pass force=true to override"}, status_code=409)
-
-    async with bootstrap_lock:
-        await historical_bootstrap(days=days)
-    return {"ok": True, "imported_days": days}
