@@ -1,9 +1,6 @@
-fastapi
-uvicorn[standard]
-aiohttp
-httpx
-SQLAlchemy
-aiosqlite
-jinja2
-python-dotenv
-pydantic
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+aiohttp>=3.9.5
+httpx>=0.27.0
+SQLAlchemy>=2.0.32
+pydantic>=2.7.4

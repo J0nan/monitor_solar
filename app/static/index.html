@@ -152,8 +152,8 @@
 
     function updateAxes(ts) {
       const last = ts ? new Date(ts) : new Date();
-      const hourAgo = new Date(last.getTime() - 60 * 60 * 1000);
-      chart.options.scales.x.min = hourAgo;
+      const dayAgo = new Date(last.getTime() - 24* 60 * 60 * 1000);
+      chart.options.scales.x.min = dayAgo;
       chart.options.scales.x.max = new Date(last.getTime() + 5 * 1000);
 
       // Auto y-range based on recent data (allow negatives)

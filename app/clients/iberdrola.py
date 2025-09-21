@@ -17,73 +17,64 @@ class IberdrolaClient:
     def __init__(self):
         self.base = BASE.rstrip("/")
         self._token = None
-        self._session = aiohttp.ClientSession()
+        self._timeout = aiohttp.ClientTimeout(total=15)
+        self._session = aiohttp.ClientSession(timeout=self._timeout)
         self._lock = asyncio.Lock()
 
     async def close(self):
         await self._session.close()
 
     async def login(self):
+        if not EMAIL or not PASSWORD:
+            raise RuntimeError("Missing IBERDROLA_EMAIL or IBERDROLA_PASSWORD")
         url = self.base + LOGIN_PATH
         body = {"email": EMAIL, "password": PASSWORD}
         async with self._session.post(url, json=body) as resp:
             resp.raise_for_status()
-            js = await resp.json()
-            # Per your info, it returns a token
+            js = await resp.json(content_type=None)
             token = js.get("token") or js.get("access_token") or js.get("data", {}).get("token")
             if not token:
-                raise RuntimeError("Login did not return token: %s" % js)
+                raise RuntimeError(f"Login did not return token: {js}")
             self._token = "Bearer " + token
             return token
+
+    def _auth_headers(self):
+        return {"Authorization": self._token} if self._token else {}
+
+    async def _request_with_reauth(self, method: str, url: str, *, params=None):
+        await self._ensure_token()
+        headers = self._auth_headers()
+        async with self._session.request(method, url, headers=headers, params=params) as resp:
+            if resp.status == 401:
+                # token expired -> re-login once
+                await self.login()
+                headers = self._auth_headers()
+                async with self._session.request(method, url, headers=headers, params=params) as resp2:
+                    resp2.raise_for_status()
+                    return await resp2.json(content_type=None)
+            resp.raise_for_status()
+            return await resp.json(content_type=None)
 
     async def _ensure_token(self):
         if not self._token:
             await self.login()
-
-    def _auth_headers(self):
-        # Authorization header uses the token directly (per your description)
-        if not self._token:
-            return {}
-        return {"Authorization": self._token}
+        if not BUILDING_ID:
+            raise RuntimeError("Missing BUILDING_ID")
 
     async def get_realtime(self):
-        """
-        Calls last_solar endpoint and returns normalized structure:
-          {
-            "timestamp": datetime (UTC),
-            "main_w": float,
-            "solar_w": float,
-            "battery_w": float,
-            "total_consumption_w": float
-          }
-        We'll take the last element of P/time arrays as the latest sample.
-        """
         async with self._lock:
-            await self._ensure_token()
             url = (self.base + LAST_SOLAR_PATH_TEMPLATE).format(building_id=BUILDING_ID)
-            headers = self._auth_headers()
-            async with self._session.get(url, headers=headers) as resp:
-                if resp.status == 401:
-                    # token expired? re-login once
-                    await self.login()
-                    headers = self._auth_headers()
-                    async with self._session.get(url, headers=headers) as resp2:
-                        resp2.raise_for_status()
-                        body = await resp2.json()
-                else:
-                    resp.raise_for_status()
-                    body = await resp.json()
+            body = await self._request_with_reauth("GET", url)
 
-        # Parse body; per your example, body has keys 'battery', 'main', 'solar', 'total_consumption'
         def last_of(obj):
             if not obj:
                 return None, None
             P = obj.get("P") or []
             times = obj.get("time") or []
-            if len(P) == 0:
+            if not P:
                 return None, None
             p = P[-1]
-            t = times[-1] if len(times) >= 1 else None
+            t = times[-1] if times else None
             return p, t
 
         main_p, main_t = last_of(body.get("main", {}))
@@ -91,10 +82,8 @@ class IberdrolaClient:
         battery_p, battery_t = last_of(body.get("battery", {}))
         total_p, total_t = last_of(body.get("total_consumption", {}))
 
-        # Prefer the most recent timestamp available among fields; otherwise use now
         ts_strs = [s for s in (main_t, solar_t, battery_t, total_t) if s]
         if ts_strs:
-            # ISO 8601 -> to datetime
             try:
                 ts = datetime.fromisoformat(ts_strs[-1].replace("Z", "+00:00")).astimezone(timezone.utc)
             except Exception:
@@ -102,7 +91,6 @@ class IberdrolaClient:
         else:
             ts = datetime.now(timezone.utc)
 
-        # Return normalized numbers (floats). The API likely returns numbers (watts).
         return {
             "timestamp": ts,
             "main_w": float(main_p or 0.0),
@@ -111,54 +99,112 @@ class IberdrolaClient:
             "total_consumption_w": float(total_p or 0.0)
         }
 
-    async def get_historical(self, start_iso: str, end_iso: str, time_unit: str = "hours"):
+    async def _fetch_solar_data(self, start_iso: str, end_iso: str, time_unit: str):
         """
-        Calls solar_data with query params start, end, time_unit.
-        Returns list of samples: [{'timestamp': datetime, 'main_w':..., 'solar_w':..., 'battery_w':...}, ...]
-        The API returns arrays of P and time; we will expand them into aligned samples.
+        Call Iberdrola solar_data using only the documented params: start, end, time_unit.
+        Example:
+          https://monitorizacion.iberdrola.com/api/auth/3/buildings/{id}/solar_data?start=...&end=...&time_unit=hours
         """
-        async with self._lock:
-            await self._ensure_token()
-            url = (self.base + SOLAR_DATA_PATH_TEMPLATE).format(building_id=BUILDING_ID)
-            headers = self._auth_headers()
-            params = {"start": start_iso, "end": end_iso, "time_unit": time_unit}
-            async with self._session.get(url, headers=headers, params=params) as resp:
-                if resp.status == 401:
-                    await self.login()
-                    headers = self._auth_headers()
-                    async with self._session.get(url, headers=headers, params=params) as resp2:
-                        resp2.raise_for_status()
-                        body = await resp2.json()
-                else:
-                    resp.raise_for_status()
-                    body = await resp.json()
+        url = (self.base + SOLAR_DATA_PATH_TEMPLATE).format(building_id=BUILDING_ID)
+        params = {"start": start_iso, "end": end_iso, "time_unit": time_unit}
 
-        # The response may contain nested data; try to find arrays:
-        # Expect a JSON with same keys ('battery','main','solar','total_consumption') each having 'P' and 'time' arrays.
-        battery = body.get("battery", {})
-        main = body.get("main", {})
-        solar = body.get("solar", {})
-        total_consumption = body.get("total_consumption", {})
-
-        # Determine the canonical time array: prefer main.time, then solar.time, etc.
-        time_arr = main.get("time") or solar.get("time") or battery.get("time") or total_consumption.get("time") or []
-        main_p = main.get("P") or []
-        solar_p = solar.get("P") or []
-        battery_p = battery.get("P") or []
-        total_p = total_consumption.get("P") or []
-
-        samples = []
-        for idx, tstr in enumerate(time_arr):
+        # Small retry loop for rate limiting
+        for attempt in range(3):
             try:
-                ts = datetime.fromisoformat(tstr.replace("Z", "+00:00")).astimezone(timezone.utc)
+                body = await self._request_with_reauth("GET", url, params=params)
+                # Only accept the new shape (data + time)
+                if isinstance(body, dict) and isinstance(body.get("data"), dict) and isinstance(body.get("time"), list) and body.get("time"):
+                    return body
+                return {}
+            except aiohttp.ClientResponseError as e:
+                if e.status == 429 and attempt < 2:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
+                raise
+            except Exception:
+                if attempt < 2:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                return {}
+
+    def _parse_historical_samples(self, body: dict):
+        """
+        Parse Iberdrola's new historical shape:
+        {
+          "data": { "total_consumption": [...], "purchased_energy": [...], ... },
+          "time": ["2025-01-01T10:00:00Z", ...]
+        }
+        Returns list of dicts with:
+          timestamp (UTC datetime),
+          main_w, solar_w, battery_w, total_consumption_w (avg W),
+          purchased_wh, generated_wh, exported_wh, total_consumption_wh, from_battery_wh, to_battery_wh.
+        """
+        samples = []
+
+        data = body.get("data")
+        time_arr = body.get("time") or []
+        if not (isinstance(data, dict) and isinstance(time_arr, list) and len(time_arr) > 0):
+            return samples  # empty
+
+        tc = data.get("total_consumption") or []
+        pe = data.get("purchased_energy") or []
+        ge = data.get("generated_energy") or []
+        ee = data.get("exported_energy") or []
+        fb = data.get("from_battery") or []
+        tb = data.get("to_battery") or []
+
+        n = len(time_arr)
+        for i in range(n):
+            try:
+                ts = datetime.fromisoformat(str(time_arr[i]).replace("Z", "+00:00")).astimezone(timezone.utc)
             except Exception:
                 continue
-            samp = {
+            # Wh series (hourly)
+            purchased_wh = float(pe[i]) if i < len(pe) and pe[i] is not None else 0.0
+            generated_wh = float(ge[i]) if i < len(ge) and ge[i] is not None else 0.0
+            exported_wh = float(ee[i]) if i < len(ee) and ee[i] is not None else 0.0
+            total_wh = float(tc[i]) if i < len(tc) and tc[i] is not None else 0.0
+            from_batt_wh = float(fb[i]) if i < len(fb) and fb[i] is not None else 0.0
+            to_batt_wh = float(tb[i]) if i < len(tb) and tb[i] is not None else 0.0
+
+            # Average signed main W = import - export
+            main_w = purchased_wh - exported_wh
+            solar_w = generated_wh
+            total_w = total_wh
+            battery_w = from_batt_wh - to_batt_wh
+
+            samples.append({
                 "timestamp": ts,
-                "main_w": float(main_p[idx]) if idx < len(main_p) else 0.0,
-                "solar_w": float(solar_p[idx]) if idx < len(solar_p) else 0.0,
-                "battery_w": float(battery_p[idx]) if idx < len(battery_p) else 0.0,
-                "total_consumption_w": float(total_p[idx]) if idx < len(total_p) else 0.0
-            }
-            samples.append(samp)
+                "main_w": main_w,
+                "solar_w": solar_w,
+                "battery_w": battery_w,
+                "total_consumption_w": total_w,
+                "purchased_wh": purchased_wh,
+                "generated_wh": generated_wh,
+                "exported_wh": exported_wh,
+                "total_consumption_wh": total_wh,
+                "from_battery_wh": from_batt_wh,
+                "to_battery_wh": to_batt_wh,
+            })
         return samples
+
+    async def get_historical_range(self, start_dt, end_dt, time_unit: str = "hours"):
+        """
+        Fetch historical samples in the given [start_dt, end_dt) UTC interval using the new shape.
+        """
+        start_iso = start_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_iso = end_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        body = await self._fetch_solar_data(start_iso, end_iso, time_unit)
+        return self._parse_historical_samples(body)
+
+    async def get_historical(self, start_iso: str, end_iso: str, time_unit: str = "hours"):
+        """
+        Backward-compatible wrapper; prefer get_historical_range.
+        """
+        try:
+            start_dt = datetime.fromisoformat(start_iso.replace("Z", "+00:00")).astimezone(timezone.utc)
+            end_dt = datetime.fromisoformat(end_iso.replace("Z", "+00:00")).astimezone(timezone.utc)
+        except Exception:
+            start_dt = datetime.now(timezone.utc)
+            end_dt = datetime.now(timezone.utc)
+        return await self.get_historical_range(start_dt, end_dt, time_unit="hours")

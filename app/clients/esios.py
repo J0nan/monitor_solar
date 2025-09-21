@@ -12,11 +12,12 @@ class EsiosClient:
     def __init__(self):
         if not ESIOS_API_KEY:
             raise ValueError("ESIOS_API_KEY environment variable is not set")
+        timeout = aiohttp.ClientTimeout(total=15)
         self.session = aiohttp.ClientSession(headers={
             "Accept": "application/json; application/vnd.esios-api-v2+json",
             "Content-Type": "application/json",
             "x-api-key": ESIOS_API_KEY,
-        })
+        }, timeout=timeout)
 
     async def close(self):
         await self.session.close()
@@ -34,7 +35,7 @@ class EsiosClient:
         url = ESIOS_BASE + f"indicators/{indicator_id}"
         async with self.session.get(url, params=params) as resp:
             resp.raise_for_status()
-            js = await resp.json()
+            js = await resp.json(content_type=None)
 
         vals = js.get("indicator", {}).get("values") or js.get("values") or []
         out = {}
@@ -44,7 +45,10 @@ class EsiosClient:
                 continue
             if dt.endswith("Z"):
                 dt = dt.replace("Z", "+00:00")
-            dt_obj = datetime.fromisoformat(dt).astimezone(timezone.utc)
+            try:
+                dt_obj = datetime.fromisoformat(dt).astimezone(timezone.utc)
+            except Exception:
+                continue
             hour = dt_obj.replace(minute=0, second=0, microsecond=0)
             val = entry.get("value")
             if val is None:
@@ -52,14 +56,14 @@ class EsiosClient:
             try:
                 price = float(val) / 1000.0  # €/MWh => €/kWh
             except Exception:
-                price = float(val)
+                try:
+                    price = float(val)
+                except Exception:
+                    continue
             out[hour] = price
         return out
 
     async def get_pvpc_for_range(self, start_dt, end_dt):
-        """
-        Backward-compatible: default to buying indicator 1001.
-        """
         return await self._get_indicator_for_range(ESIOS_INDICATOR_ID, start_dt, end_dt)
 
     async def get_buy_prices_for_range(self, start_dt, end_dt):
